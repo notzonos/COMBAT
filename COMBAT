@@ -1,0 +1,424 @@
+--We get all the variables needed
+local player = game:FindService("Players").LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait() 
+local humanoid = character:WaitForChild("Humanoid")
+ 
+local statusFold = character:WaitForChild("StatusFolder") 
+ 
+local uis = game:FindService("UserInputService")
+local ts = game:FindService("TweenService")
+ 
+local resources = game:FindService("ReplicatedStorage"):WaitForChild("Fx")
+ 
+--We now create a Raycast setting the new params:
+local params = RaycastParams.new()
+params.FilterType = Enum.RaycastFilterType.Whitelist
+params.FilterDescendantsInstances = {workspace.Map}
+ 
+local remote = game:FindService("ReplicatedStorage").CombatEvent
+ 
+--Setting up variables for the combat, lastTimeM1 means the last time you punches while the lastM1End means the last full combo
+--Combo means how much combos you can do
+local lastTimeM1 = 0
+local lastM1End = 0
+local combo = 1
+ 
+ 
+local blocking = false --Players current status of blocking is false
+local canAir = true --The player can go air combos
+ 
+local punchAnims = {
+    'rbxassetid://12917617460',--1
+    'rbxassetid://12917619544',--2
+    'rbxassetid://12917621448',--3
+    'rbxassetid://12917623007',--4
+    'rbxassetid://12917624631',--5
+}
+ 
+local airAnims = {
+    'rbxassetid://12917626145',--KickUp
+    'rbxassetid://12917627693'--KickDown
+}
+ 
+local blockAnims = {
+    'rbxassetid://12917910262'--Block
+}
+ 
+local function hb(size, cframe, ignore, char) --We make the hitbox
+    local hb = Instance.new("Part", workspace.Fx) --We parent it to the FX in the workspace
+    --We set it up
+    hb.Anchored = true 
+    hb.CanCollide = false
+    hb.Transparency = .6
+    hb.Name = "hb"
+    hb.Material = Enum.Material.ForceField
+    hb.Size = size
+    hb.CFrame = cframe
+    --
+    local con
+    con = hb.Touched:Connect(function()
+        con:Disconnect()
+    end)
+    
+    local lasttarg
+    
+    for i,v in pairs(hb:GetTouchingParts()) do --This checks if the hitbox is touching a player
+        if v.Parent:FindFirstChild("Humanoid") and table.find(ignore, v.Parent) == nil then --We ignore the player who is punching (It's gonna take damage if not did so)
+            if lasttarg then
+                if (lasttarg.Position - char.PrimaryPart.Position).Magnitude > (v.Position - char.PrimaryPart.Position).Magnitude then --We check if there is a target
+                    lasttarg = v.Parent.PrimaryPart --In this case, the target is the primary part of the player who is touching the hitbox
+                end
+            else
+                lasttarg = v.Parent.PrimaryPart
+            end
+        end
+    end
+    
+    hb:Destroy()
+    if lasttarg then
+        return lasttarg.Parent --We return the target to the server so it will be server sided aswell
+    else
+        return nil
+    end
+end
+ 
+--THIS FUNCTION IS FOR ALL THE EFFECTS
+local function crater(data)
+    local cT = tick()
+    local craterRayCASTResults
+    
+    repeat
+        craterRayCASTResults = workspace:Raycast(data.Target.PrimaryPart.Position, data.Direction, params)
+        print(craterRayCASTResults)
+        wait()
+    until tick() - cT > 5 or craterRayCASTResults ~= nil
+    
+    if craterRayCASTResults then
+        for i = 0, 14 do --We create 14 different parts to spawn
+            --We are setting them up
+            local p = Instance.new("Part", workspace.Fx)
+            p.Size = Vector3.new(4, math.random(10,20)/10, math.random(10,20)/10)
+            p.Anchored = true
+            p.CFrame = CFrame.new(craterRayCASTResults.Position, craterRayCASTResults.Position + craterRayCASTResults.Normal)
+            p.CFrame = p.CFrame * CFrame.Angles(math.rad(50), math.rad(i * 360/14), 0) * CFrame.new(0,0,-4 * 2) * CFrame.Angles(math.rad(35),0,0)
+            p.CanQuery = false
+            p.CanCollide = false
+            p.CanTouch = false
+            
+            --We spawn them for all the player's position
+            local result = workspace:Raycast(p.Position + craterRayCASTResults.Normal * 4, craterRayCASTResults.Normal * -5, params)
+            if result then
+                p.Position = result.Position
+                p.Material = result.Material
+                p.Color = result.Instance.Color
+            else
+                p:Destroy()
+            end
+            
+            p.Position = p.Position + craterRayCASTResults.Normal * -4
+            ts:Create(p, TweenInfo.new(.2, Enum.EasingStyle.Cubic, Enum.EasingDirection.Out, 0, false, 0), {Position = p.Position + craterRayCASTResults.Normal * 5}):Play()
+            
+            --We spawn them with a nice animation
+            spawn(function()
+                game.Debris:AddItem(p,4)
+                wait(3)
+                ts:Create(p, TweenInfo.new(.5, Enum.EasingStyle.Cubic, Enum.EasingDirection.Out, 0, false, 0), {Position = p.Position + craterRayCASTResults.Normal * -4}):Play()
+            end)
+            
+            --We make it so that if when the player hits the ground from an air combo, it will spawn the rubbles following him
+            if i % 3 < 2 and result then
+                --All the setting up
+                local rubble = p:Clone()
+                rubble.Size = Vector3.new(math.random(10,20)/20, math.random(10,20)/20,math.random(10,20)/20)
+                rubble.Position = result.Position + craterRayCASTResults.Normal * 4
+                rubble.Material = result.Material
+                rubble.Color = result.Instance.Color --This will make it take the color directly from the map
+                
+                rubble.Parent = workspace.Fx
+                rubble.Anchored = false
+                rubble.CanCollide = true
+            
+                local bv = Instance.new("BodyVelocity", rubble)
+                bv.Velocity = Vector3.new(math.random(-40,40), 35, math.random(-40,40))
+                bv.MaxForce = Vector3.new(99999,99999,99999)
+                bv.Name = "Velocity"
+                
+                game.Debris:AddItem(bv, .1) --We add both BodyVEL and RUBBLES
+                game.Debris:AddItem(rubble, 4)
+                
+                --We create a nice anim for those too
+                spawn(function()
+                    wait(2)
+                    ts:Create(rubble, TweenInfo.new(1, Enum.EasingStyle.Cubic, Enum.EasingDirection.Out, 0, false, 0), {Transparency = 1}):Play()
+                end)
+                
+                rubble.Transparency = 0
+            end
+        end
+    end
+end
+ 
+--THIS FUNCTION MAKES IT SO IT WILL CREATE ROCKS WHEN A FINISHER IS HIT
+local function finisher(data)
+    local cf = data.Character.PrimaryPart.CFrame
+    
+    for i = 1,20 do --We spawn 20 of them
+        --Set them up
+        local rock = Instance.new("Part")
+        rock.Size = Vector3.new(1,1,1)
+        rock.CFrame = cf * CFrame.new(3,0,-4 + (i * -1))
+        rock.CanCollide = false
+        rock.Anchored = true
+        local result = workspace:Raycast(rock.Position, Vector3.new(0,-4,0), params)
+        if result then --We check if there was an hit, if so then we create the finisher, else we destroy it
+            rock.Position = result.Position
+            rock.Material = result.Material
+            rock.Color = result.Instance.Color
+            rock.Rotation = Vector3.new(math.random(0,180),math.random(0,180),math.random(0,180))
+            rock.Parent = workspace.Fx
+            game.Debris:AddItem(rock,2)
+        else
+            rock:Destroy()
+        end
+        --Same thing as before, this time we create it on the other side since its a circle
+        rock.Size = Vector3.new(1,1,1)
+        rock.CFrame = cf * CFrame.new(-3,0,-4 + (i * -1))
+        rock.CanCollide = false
+        rock.Anchored = true
+        local result = workspace:Raycast(rock.Position, Vector3.new(0,-4,0), params)
+        if result then
+            rock.Position = result.Position
+            rock.Material = result.Material
+            rock.Color = result.Instance.Color
+            rock.Rotation = Vector3.new(math.random(0,180),math.random(0,180),math.random(0,180))
+            rock.Parent = workspace.Fx
+            game.Debris:AddItem(rock,2)
+        else
+            rock:Destroy()
+        end
+        
+        if i%4==0 then
+            wait()
+        end
+        --SAME THING AS BEFORE, this time its for the small rocks
+        if i == 20 then
+            for n = 1,4 do
+                local rock = Instance.new("Part")
+                rock.Size = Vector3.new(1,1,1)
+                rock.CFrame = cf * CFrame.new(3 -(n/1.5),0,-25 + (n*-.5))
+                rock.CanCollide = false
+                rock.Anchored = true
+                local result = workspace:Raycast(rock.Position, Vector3.new(0,-4,0), params)
+                if result then
+                    rock.Position = result.Position
+                    rock.Material = result.Material
+                    rock.Color = result.Instance.Color
+                    
+                    rock.Rotation = Vector3.new(math.random(0,180),math.random(0,180),math.random(0,180))
+                    rock.Parent = workspace.Fx
+                    game.Debris:AddItem(rock,2)
+                else
+                    rock:Destroy()
+                end
+                
+                local rock = Instance.new("Part")
+                rock.Size = Vector3.new(1,1,1)
+                rock.CFrame = cf * CFrame.new(-3 -(n/2),0,-25 + (n*-.5))
+                rock.CanCollide = false
+                rock.Anchored = true
+                local result = workspace:Raycast(rock.Position, Vector3.new(0,-4,0), params)
+                if result then
+                    rock.Position = result.Position
+                    rock.Material = result.Material
+                    rock.Color = result.Instance.Color
+ 
+                    rock.Rotation = Vector3.new(math.random(0,180),math.random(0,180),math.random(0,180))
+                    rock.Parent = workspace.Fx
+                    game.Debris:AddItem(rock,2)
+                else
+                    rock:Destroy()
+                end
+            end
+        end
+    end
+end
+ 
+--This will be our main stuff, we will actual make those function true
+uis.InputBegan:Connect(function(input, isTyping)
+    if isTyping then return end --If the user is typing we dont want it to kill someone right? 
+    --This will detect the input, and if we are clicking in time to do the combos
+    if input.UserInputType == Enum.UserInputType.MouseButton1 and tick() - lastTimeM1 > .4 and tick() - lastM1End > .7 and not blocking then
+        if tick() - lastTimeM1 > .7 then
+            combo = 1 --If we lost some time from the last punch then we set the combo to 0 again
+        end
+        
+        lastTimeM1 = tick()
+        
+        local animation = Instance.new("Animation", workspace.Fx)
+        local air = nil
+        
+        --If its holding space and its the fourth combo, the user will go in air, following the target
+        if uis:IsKeyDown("Space") and combo == 4 and canAir then
+            canAir = false
+            animation.AnimationId = airAnims[1]
+            air = "Up"
+        elseif not uis:IsKeyDown("Space") and combo == 5 and not canAir then --We check if he punched the last time when in air, and if so, we send him down again
+            animation.AnimationId = airAnims[2]
+            air = "Down"
+        else
+            animation.AnimationId = punchAnims[combo]
+        end
+        --Animation stuff...
+        local load = humanoid.Animator:LoadAnimation(animation)
+        load:Play()
+        
+        animation:Destroy()
+        
+        local hitTarg = hb(Vector3.new(4,6,4), character.PrimaryPart.CFrame * CFrame.new(0,0,-3), {character}, character)
+        --This is the datas, useful to understand which input on the client we are receiving
+        if hitTarg then
+            local data = {
+                ["Target"] = hitTarg,
+                ["Character"] = character,
+                ["Combo"] = combo,
+                ["Air"] = air,
+                ["Action"] = "nil"
+            }
+            remote:FireServer(data) --We fire all the stuff!
+        end
+        
+        if combo == #punchAnims then
+            combo = 1
+            lastM1End = tick()
+        else
+            combo += 1 --We add a combo to make it continue
+        end
+        
+        humanoid.WalkSpeed = 0
+        wait(.4)
+        humanoid.WalkSpeed = 16 --We dont want the user to walk while punching, so its better if we set the walkspeed to 0 and then to 16 again
+        --We check if the user is blocking and not stunned 
+    elseif input.KeyCode == Enum.KeyCode.F and tick() - lastTimeM1 > .3 and statusFold:FindFirstChild("Stun") == nil then
+        blocking = true --If its all correct then he can block and we set everything up
+        local animation = Instance.new("Animation", workspace.Fx)
+        animation.AnimationId = blockAnims[1]
+        
+        local blockAnim = humanoid.Animator:LoadAnimation(animation)
+        blockAnim:Play()
+        animation:Destroy() --We destroy the animation for optimization and we fire everything
+        
+        local data = {
+            ["Action"] = "Blocking", --As i said, the data is useful to understand the input from the client
+            ["Character"] = character
+        }
+        
+        remote:FireServer(data)
+        repeat
+            wait()
+        until blocking == false or statusFold:FindFirstChild("Stun") --We wait until hes not blocking anymore or hes stunned
+        
+        blocking = false
+        blockAnim:Stop() --And then we stop his animation and remove his blocking status
+    end
+end)
+--SAME THING AS BEFOER BUT THIS TIME THE ONLY THING CHANGED IS THAT IT DETECTS IF THE USER IS UNBLOCKING
+uis.InputEnded:Connect(function(inp, gp)
+    if gp then return end
+    if inp.KeyCode == Enum.KeyCode.F then
+        blocking = not blocking
+        local data = {
+            ["Action"] = "Unblocking",
+            ["Character"] = character
+        }
+        
+        remote:FireServer(data)
+    end
+end)
+--We apply the effects made before
+local function hitef(target)
+    for i, particle in pairs(resources.Hit:GetChildren()) do 
+        local clone = particle:Clone()
+        clone.Parent = target.UpperTorso.BodyFrontAttachment
+        clone:Emit(clone:GetAttribute("EmitCount"))
+        game.Debris:AddItem(clone, .3)
+    end
+end
+ 
+local function blockef(target)
+    for i, particle in pairs(resources.Block:GetChildren()) do
+        local clone = particle:Clone()
+        clone.Parent = target.UpperTorso.BodyFrontAttachment
+        clone:Emit(clone:GetAttribute("EmitCount"))
+        game.Debris:AddItem(clone, .3)
+    end
+    if uis:IsKeyDown("Space") and combo == 4 and canAir and target:WaitForChild("Block").Value == true then
+        canAir = false --Simple function made so if the target is blocking and we try to air them, it wont work
+    else
+        canAir = true --Else it will work
+    end
+end
+--And we set them on the server
+remote.OnClientEvent:Connect(function(data)
+    if data.Action == "Crater" then
+        crater(data)
+    elseif data.Action == "Finisher" then
+        finisher(data)
+    elseif data.Action == "Hit" then
+        hitef(data.Target)
+    elseif data.Action == "Block" then
+        blockef(data.Target)
+    end
+    
+end)
+ 
+--This will detect and set up stuff if the user is stunned or is blocking
+statusFold.ChildAdded:Connect(function(child)
+    local ws = 16
+    local jumpH = 7.2
+    for i,status in pairs(statusFold:GetChildren()) do
+        if status.Name == "Stun" then
+            ws = 0 --No movement nor jumping
+            jumpH = 0
+        elseif status.Name == "Block" then
+            ws = 3 --Movement a bit but jumping not allowed
+            jumpH = 0
+        end
+    end
+    humanoid.WalkSpeed = ws --We set the variables to the actual humanoid
+    humanoid.JumpHeight = jumpH
+end)
+ 
+--SAME THING AS BEFORE BUT WE DETECT IF A CHILD WAS REMOVED FROM THE FOLDER
+statusFold.ChildRemoved:Connect(function(child)
+    local ws = 16
+    local jumpH = 7.2
+    if blocking then
+        ws = 0
+        jumpH = 0
+    end
+    for i,status in pairs(statusFold:GetChildren()) do
+        if status.Name == "Stun" then
+            ws = 0
+            jumpH = 0
+        elseif status.Name == "Block" then
+            ws = 3
+            jumpH = 0
+        end
+    end
+    humanoid.WalkSpeed = ws
+    humanoid.JumpHeight = jumpH
+end)
+ 
+humanoid.StateChanged:Connect(function(old,new)
+    if new == Enum.HumanoidStateType.Landed then
+        canAir = true --If the user has touched the ground, he can do air combos again (otherwise he can do infinite air)
+    end
+end)
+ 
+uis.JumpRequest:Connect(function()
+    if tick() - lastTimeM1 < 1 then
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, false) --We disable the jump animation
+    else
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true) --We enable it again
+    end
+end)
